@@ -125,27 +125,31 @@ class RelationAwareTreeLSTMCell(nn.Module):
             elif 'bias' in name:
                 nn.init.constant_(param, 0.1)
     
-    def forward(self, 
-                input_vec: torch.Tensor, 
-                child_h: torch.Tensor, 
+    def forward(self,
+                input_vec: torch.Tensor,
+                child_h: torch.Tensor,
                 child_c: torch.Tensor,
-                relation_ids: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+                relation_ids: Optional[torch.Tensor] = None,
+                virtual_mask: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         前向传播
-        
+
         Args:
             input_vec: 当前节点的输入向量 (batch_size, input_dim)
             child_h: 子节点的隐藏状态 (batch_size, num_children, hidden_dim)
             child_c: 子节点的细胞状态 (batch_size, num_children, hidden_dim)
             relation_ids: 关系类型ID (batch_size, num_children)
-            
+            virtual_mask: 虚拟节点掩码 (batch_size, num_children)，True=虚拟节点，权重衰减0.7
+
         Returns:
             h: 新的隐藏状态 (batch_size, hidden_dim)
             c: 新的细胞状态 (batch_size, hidden_dim)
         """
+        VIRTUAL_DECAY = 0.7  # 虚拟节点权重衰减系数
+
         batch_size = input_vec.size(0)
         num_children = child_h.size(1)
-        
+
         if num_children == 0:
             # 无子节点时，使用零向量
             child_h_sum = torch.zeros(batch_size, self.hidden_dim, device=input_vec.device)
@@ -155,34 +159,45 @@ class RelationAwareTreeLSTMCell(nn.Module):
             if relation_ids is None:
                 relation_ids = torch.zeros(num_children, dtype=torch.long, device=input_vec.device)
                 relation_ids = relation_ids.unsqueeze(0).expand(batch_size, -1)
-            
+
+            # 虚拟节点权重衰减：virtual_mask 中 True 的位置乘以 VIRTUAL_DECAY
+            if virtual_mask is not None:
+                # virtual_mask: (batch_size, num_children) bool
+                decay = torch.where(
+                    virtual_mask,
+                    torch.full_like(child_h[:, :, 0], VIRTUAL_DECAY),
+                    torch.ones_like(child_h[:, :, 0])
+                )  # (batch_size, num_children)
+                child_h = child_h * decay.unsqueeze(-1)
+                child_c = child_c * decay.unsqueeze(-1)
+
             # 获取关系嵌入
             relation_emb = self.relation_embedding(relation_ids)  # (batch_size, num_children, hidden_dim)
-            
+
             # 关系感知的注意力加权
             attention_scores = self.relation_attention(relation_emb + child_h)  # (batch_size, num_children, 1)
             attention_weights = F.softmax(attention_scores, dim=1)  # (batch_size, num_children, 1)
-            
+
             # 加权求和
             child_h_weighted = child_h * attention_weights  # (batch_size, num_children, hidden_dim)
             child_h_sum = torch.sum(child_h_weighted, dim=1)  # (batch_size, hidden_dim)
-            
+
             # 遗忘门：对不同关系类型使用不同的遗忘门
             child_c_list = []
             for i in range(num_children):
                 # 获取当前子节点的关系类型
                 rel_id = relation_ids[:, i]  # (batch_size,)
-                
+
                 # 计算遗忘门
                 f = torch.zeros(batch_size, self.hidden_dim, device=input_vec.device)
                 for r in range(self.num_relations):
                     mask = (rel_id == r)
                     if mask.any():
                         f[mask] = self.f_u[r](child_h[:, i, :])[mask]
-                
+
                 child_c_i = f * child_c[:, i, :]  # (batch_size, hidden_dim)
                 child_c_list.append(child_c_i)
-            
+
             child_c_sum = torch.stack(child_c_list, dim=1).sum(dim=1)  # (batch_size, hidden_dim)
         
         # 拼接输入和子节点信息
@@ -251,61 +266,77 @@ class PropagationTreeEncoder(nn.Module):
             elif 'bias' in name:
                 nn.init.constant_(param, 0.1)
     
-    def forward(self, 
+    def forward(self,
                 tree_structure: Dict,
                 node_features: torch.Tensor) -> torch.Tensor:
         """
         前向传播
-        
+
         Args:
             tree_structure: 树结构信息 {
-                'adjacency': List[List[int]],  # 邻接表
+                'adjacency': List[List[int]],       # 邻接表
                 'relation_types': List[List[int]],  # 关系类型
-                'root': int  # 根节点索引
+                'root': int,                        # 根节点索引
+                'virtual_flags': List[bool]         # 可选，虚拟节点标记
             }
             node_features: 节点特征 (batch_size, num_nodes, input_dim)
-            
+
         Returns:
             output: 编码后的传播特征 (batch_size, hidden_dim)
         """
         batch_size = node_features.size(0)
         num_nodes = node_features.size(1)
-        
+
         # 编码节点特征
         h = self.node_encoder(node_features)  # (batch_size, num_nodes, hidden_dim)
         c = torch.zeros(batch_size, num_nodes, self.hidden_dim, device=node_features.device)
-        
+
         # 获取拓扑序（从叶子到根）
         adjacency = tree_structure['adjacency']  # List of lists
         relation_types = tree_structure.get('relation_types', None)
         root = tree_structure.get('root', 0)
-        
+        virtual_flags = tree_structure.get('virtual_flags', None)  # List[bool]
+
         # 构建节点顺序（后序遍历：先处理子节点，再处理父节点）
         node_order = self._post_order(adjacency)
-        
+
         # 逐步更新每个节点
         for node_idx in node_order:
             # 获取子节点
             children = adjacency[node_idx] if node_idx < len(adjacency) else []
-            
+
             if len(children) > 0:
                 # 收集子节点的隐藏状态和细胞状态
                 child_h = h[:, children, :]  # (batch_size, num_children, hidden_dim)
                 child_c = c[:, children, :]  # (batch_size, num_children, hidden_dim)
-                
+
                 # 获取关系类型
                 if relation_types is not None and node_idx < len(relation_types):
-                    rel_ids = torch.tensor(relation_types[node_idx], 
-                                          dtype=torch.long, 
+                    rel_ids = torch.tensor(relation_types[node_idx],
+                                          dtype=torch.long,
                                           device=node_features.device)
                     rel_ids = rel_ids.unsqueeze(0).expand(batch_size, -1)
                 else:
                     rel_ids = None
-                
+
+                # 构建虚拟节点掩码 (batch_size, num_children)
+                v_mask = None
+                if virtual_flags is not None:
+                    child_virtual = [virtual_flags[c_idx] if c_idx < len(virtual_flags) else False
+                                     for c_idx in children]
+                    v_mask = torch.tensor(child_virtual, dtype=torch.bool,
+                                         device=node_features.device)
+                    v_mask = v_mask.unsqueeze(0).expand(batch_size, -1)
+
                 # 更新当前节点
-                h[:, node_idx, :], c[:, node_idx, :] = self.tree_lstm(
-                    h[:, node_idx, :], child_h, child_c, rel_ids
-                )
+                if isinstance(self.tree_lstm, RelationAwareTreeLSTMCell):
+                    h[:, node_idx, :], c[:, node_idx, :] = self.tree_lstm(
+                        h[:, node_idx, :], child_h, child_c, rel_ids, v_mask
+                    )
+                else:
+                    h[:, node_idx, :], c[:, node_idx, :] = self.tree_lstm(
+                        h[:, node_idx, :], child_h, child_c
+                    )
         
         # 池化获取最终表示
         if self.pooling == 'root':

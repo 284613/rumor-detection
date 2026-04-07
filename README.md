@@ -1,82 +1,66 @@
-# 社交媒体恶意谣言识别研究与实现
+# 社交媒体恶意谣言识别的研究与实现 (Rumor Detection)
 
-## 项目概述
+本项目旨在构建一个多语言、多任务的社交媒体谣言检测系统，支持中文（新浪微博）和英文（Twitter）数据，集成了传统的深度学习模型与先进的预训练模型。
 
-基于深度学习的社交媒体谣言自动识别系统，支持中文微博和英文Twitter。
+## 🚀 核心功能
+- **多模型支持**: 集成 TextCNN, CNN+GRU+Attention 以及 BERT+CNN 模型。
+- **多任务学习**: 同时进行谣言分类与立场检测（Stance Detection）。
+- **传播分析**: 支持社交媒体传播关系树（Propagation Tree）特征提取。
+- **数据增强**: 内置基于 LLM（通义千问）的数据增强模块，支持语义变换与立场生成。
+- **原型系统**: 提供基于 Streamlit 的可视化交互界面，实现实时检测。
 
-## 目录结构
-
-```
+## 📂 项目结构
+项目经过重构与精简，结构如下：
+```text
 rumor_detection/
-├── docs/               # 项目文档
-│   ├── README.md       # 项目总文档
-│   ├── task-plan.md    # 任务计划
-│   └── PROJECT_LOG.md  # 项目日志
-│
-├── models/             # 模型定义
-│   ├── propagation_tree.py   # 传播树模块
-│   ├── bert_cnn.py          # BERT+CNN
-│   ├── multi_task.py        # 多任务学习
-│   └── best_optimized_model.pth  # 最优模型 (87.6%)
-│
-├── data/               # 数据目录
-│   ├── raw/           # 原始数据集
-│   └── processed/      # 处理后的数据
-│
-├── utils/              # 工具脚本
-│   ├── data_augmentation.py  # 数据增强
-│   ├── llm_augment.py       # LLM增强
-│   └── annotation_qc.py     # 标注质量控制
-│
-├── app/                # 原型系统
-│   └── streamlit_app.py     # Streamlit演示
-│
-├── scripts/            # 脚本
-│   ├── create_midterm_ppt.js  # PPT生成脚本
-│   └── train_*.py           # 训练脚本
-│
-├── reports/            # 汇报材料
-│   └── 中期汇报_动画版.pptx   # 最终版PPT
-│
-├── train_*.py         # 训练脚本（根目录）
-├── evaluate.py         # 评估脚本
-└── requirements.txt   # 依赖
+├── app/                # Streamlit 可视化原型系统
+├── data/               # 数据集说明与格式示例 (原始大数据不上传)
+├── docker/             # Docker 部署配置文件
+├── docs/               # 项目文档、研究计划与开发日志
+├── models/             # 模型定义 (BERT, TextCNN, GNN等) 及训练好的权重
+├── reports/            # 汇报文档、中期报告及 PPT (含归档)
+├── scripts/            # 核心执行脚本
+│   ├── training/       # 训练脚本 (BERT, TextCNN, CNN-GRU-Attn)
+│   ├── process_crawled.py    # 原始爬虫数据处理
+│   ├── prepare_test_data.py  # 测试数据划分与准备
+│   └── test_all_models.py    # 多模型横向评估对比
+├── utils/              # 工具函数 (数据增强、爬虫、传播树提取等)
+└── requirements.txt    # 项目依赖
 ```
 
-## 已完成模型
+## 📊 数据集
+详细的数据格式与获取方式请参考 [data/README.md](./data/README.md)。
+- **主要来源**: THU Rumor, CED Dataset, PHEME, Twitter15/16.
+- **标注体系**: 谣言/真实/未证实，以及支持/反对/中立立場。
 
-| 模型 | 准确率 | 文件 |
-|------|--------|------|
-| TextCNN | 73% | train_cn.py |
-| 多任务BERT | 61.57% | train_advanced.py |
-| **CNN+GRU+Attention** | **87.60%** | train_optimized.py |
+## 🛠️ 快速上手
 
-## 快速开始
-
+### 1. 环境准备
 ```bash
-# 安装依赖
 pip install -r requirements.txt
+```
 
-# 训练模型
-python train_optimized.py
+### 2. 模型训练
+进入 `scripts/training/` 目录运行对应的训练脚本：
+```bash
+# 训练先进的 BERT+CNN 多任务模型
+python scripts/training/train_bert.py
 
-# 评估
-python evaluate.py
+# 训练轻量级的 TextCNN 模型
+python scripts/training/train_textcnn.py
+```
 
-# 启动演示
+### 3. 模型评估
+```bash
+python scripts/evaluate.py
+# 或对比所有模型
+python scripts/test_all_models.py
+```
+
+### 4. 运行原型系统
+```bash
 streamlit run app/streamlit_app.py
 ```
 
-## 核心创新
-
-1. **传播树结构建模** - 利用谣言传播链的树状结构
-2. **多关系区分** - 区分转发/评论/引用三种传播关系
-3. **多任务学习** - 联合谣言分类与立场检测
-
-## 数据集
-
-- 清华微博谣言数据集 (31,669条)
-- CED_Dataset (3,387条)
-- PHEME英文数据集 (5,447条)
-- LIAR (12,800条)
-- 总计: 56,111条中英双语数据
+## 📝 许可证
+[MIT License](LICENSE)

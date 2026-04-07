@@ -1,214 +1,179 @@
 # -*- coding: utf-8 -*-
 """
-测试集数据增强脚本
-使用LLM（千问）对processed_crawled数据增强，生成不同立场版本
-目标：5000+条测试数据
+多立场虚拟回复增强脚本
+使用 Qwen API 对 processed_crawled.json 生成含 virtual_children 的增强数据
+输出格式：augmented_qwen.json（含 virtual_children 字段）
 """
 import os
 import json
-import random
 import time
+import hashlib
+import requests
+from pathlib import Path
 
-# 加载原始数据
-print("加载原始测试数据...")
-with open("E:/rumor_detection/data/processed_crawled.json", 'r', encoding='utf-8') as f:
-    original_data = json.load(f)
+API_KEY = "sk-2ddddb50a0f84f01a5b155afb28de024"
+BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 
-print(f"原始数据: {len(original_data)} 条")
+DATA_DIR = Path("E:/rumor_detection/data")
+INPUT_FILE = DATA_DIR / "processed_crawled.json"
+OUTPUT_FILE = DATA_DIR / "augmented_qwen.json"
+CACHE_DIR = DATA_DIR / ".aug_cache"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-# 立场变换模板
-STANCE_PROMPTS = {
-    "支持": """你是一个微博用户，请站在"支持"原帖观点的立场，对以下微博内容进行改写，使其表达支持态度：
+MULTI_STANCE_PROMPT = """你是社交媒体用户行为模拟器。
+给定以下微博内容，请生成6条回复，严格按JSON输出，不要任何多余文字。
+要求：支持2条、反对2条、中立2条，立场必须均衡。
 
-原帖：{content}
+微博内容：{content}
 
-改写要求：
-1. 保持原文核心信息
-2. 明确表达支持态度
-3. 可以补充支持的理由或证据
-4. 字数与原文相近
-5. 直接输出改写结果，不要加任何标记""",
-
-    "反对": """你是一个微博用户，请站在"反对"原帖观点的立场，对以下微博内容进行改写，使其表达反对/质疑态度：
-
-原帖：{content}
-
-改写要求：
-1. 保持原文核心信息
-2. 明确表达反对或质疑
-3. 可以提出反对理由或疑问
-4. 字数与原文相近
-5. 直接输出改写结果，不要加任何标记""",
-
-    "中立": """你是一个微博用户，请站在"中立/客观"立场，对以下微博内容进行改写，使其表达不偏不倚的态度：
-
-原帖：{content}
-
-改写要求：
-1. 保持原文核心信息
-2. 不表达明显倾向
-3. 可以提出多种观点或留待验证
-4. 字数与原文相近
-5. 直接输出改写结果，不要加任何标记""",
-}
-
-# 语义变换模板
-SEMANTIC_PROMPTS = {
-    "简化": """请将以下微博内容简化表达，保留核心信息，去除修饰词：
-
-{content}
-
-要求：简化后内容更短更直接，直接输出结果""",
-
-    "详细": """请详细描述以下微博内容，增加更多细节和背景信息：
-
-{content}
-
-要求：更详细更丰富，直接输出结果""",
-
-    "换一种说法": """请换一种说法表达以下内容，保持相同意思：
-
-{content}
-
-要求：完全不同的措辞，直接输出结果""",
-}
+输出格式：
+{{"comments": [
+  {{"stance": "支持", "text": "...", "time": "0.3h"}},
+  {{"stance": "反对", "text": "...", "time": "0.5h"}},
+  {{"stance": "中立", "text": "...", "time": "0.8h"}},
+  {{"stance": "支持", "text": "...", "time": "1.1h"}},
+  {{"stance": "反对", "text": "...", "time": "1.4h"}},
+  {{"stance": "中立", "text": "...", "time": "1.7h"}}
+]}}"""
 
 
-def call_qwen_api(prompt, api_key=None):
-    """调用千问API"""
-    if api_key is None:
-        api_key = os.environ.get("DASHSCOPE_API_KEY", "")
+def _cache_key(content: str) -> str:
+    return hashlib.md5(content.encode("utf-8")).hexdigest()
 
-    if not api_key:
-        return None
 
-    import requests
+def _load_cache(content: str):
+    key = _cache_key(content)
+    cache_file = CACHE_DIR / f"{key}.json"
+    if cache_file.exists():
+        with open(cache_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return None
 
-    url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+
+def _save_cache(content: str, result):
+    key = _cache_key(content)
+    cache_file = CACHE_DIR / f"{key}.json"
+    with open(cache_file, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False)
+
+
+def call_qwen(content: str, max_retries: int = 2):
+    """调用 Qwen API，返回解析后的 comments 列表，失败返回 None"""
+    cached = _load_cache(content)
+    if cached is not None:
+        return cached
+
+    prompt = MULTI_STANCE_PROMPT.format(content=content)
     headers = {
-        "Authorization": f"Bearer {api_key}",
+        "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json"
     }
-    data = {
+    payload = {
         "model": "qwen-plus",
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 200
+        "max_tokens": 600,
+        "temperature": 0.8
     }
 
-    try:
-        resp = requests.post(url, headers=headers, json=data, timeout=30)
-        resp.raise_for_status()
-        result = resp.json()
-        return result["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        print(f"API调用失败: {e}")
-        return None
+    for attempt in range(max_retries + 1):
+        try:
+            resp = requests.post(BASE_URL, headers=headers, json=payload, timeout=30)
+            resp.raise_for_status()
+            raw = resp.json()["choices"][0]["message"]["content"].strip()
+
+            # 提取 JSON 块
+            start = raw.find("{")
+            end = raw.rfind("}") + 1
+            if start == -1 or end == 0:
+                raise ValueError("未找到JSON块")
+            parsed = json.loads(raw[start:end])
+            comments = parsed.get("comments", [])
+
+            # 校验：三种立场都必须存在
+            stances = {c.get("stance") for c in comments}
+            required = {"支持", "反对", "中立"}
+            if not required.issubset(stances):
+                raise ValueError(f"立场不均衡: {stances}")
+
+            _save_cache(content, comments)
+            return comments
+
+        except Exception as e:
+            print(f"  [attempt {attempt+1}] 失败: {e}")
+            if attempt < max_retries:
+                time.sleep(1)
+
+    return None
 
 
-def generate_augmented_data(target_count=15000):
-    """生成增强数据"""
-    augmented = []
-    current_count = len(original_data)
+def build_virtual_children(comments: list) -> list:
+    """将 comments 列表转换为 virtual_children 格式"""
+    children = []
+    for i, c in enumerate(comments):
+        children.append({
+            "id": f"v_{i}",
+            "text": c.get("text", ""),
+            "time": c.get("time", f"{(i+1)*0.3:.1f}h"),
+            "stance": c.get("stance", "中立"),
+            "is_virtual": True
+        })
+    return children
 
-    # 每条原始数据生成多种增强版本
-    operations = list(STANCE_PROMPTS.keys()) + list(SEMANTIC_PROMPTS.keys())
 
-    print(f"目标: {target_count} 条")
-    print(f"当前: {current_count} 条")
-    print(f"需要增加: {target_count - current_count} 条")
+def main():
+    print("=" * 60)
+    print("Qwen 多立场虚拟回复增强")
+    print("=" * 60)
 
-    api_key = os.environ.get("DASHSCOPE_API_KEY", "")
+    with open(INPUT_FILE, "r", encoding="utf-8") as f:
+        original_data = json.load(f)
+    print(f"原始数据: {len(original_data)} 条")
 
-    if not api_key:
-        print("\n警告: 未设置DASHSCOPE_API_KEY环境变量")
-        print("将使用模拟数据（仅供测试）")
+    # 如果已有输出文件，加载已完成的条目（断点续跑）
+    done_ids = set()
+    results = []
+    if OUTPUT_FILE.exists():
+        with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
+            results = json.load(f)
+        done_ids = {r.get("original", "")[:50] for r in results}
+        print(f"已完成: {len(results)} 条，继续增量处理")
 
-    # 循环生成直到达到目标
-    iteration = 0
-    while len(augmented) < target_count - current_count:
-        iteration += 1
-        print(f"\n迭代 {iteration}: 当前 {len(augmented)} 条")
+    for idx, item in enumerate(original_data):
+        content = item.get("content", "").strip()
+        if not content or len(content) < 10:
+            continue
+        if content[:50] in done_ids:
+            continue
 
-        for item in original_data:
-            if len(augmented) >= target_count - current_count:
-                break
+        print(f"[{idx+1}/{len(original_data)}] 处理: {content[:40]}...")
+        comments = call_qwen(content)
 
-            content = item.get('content', '')
-            if not content or len(content) < 10:
-                continue
+        if comments is None:
+            print("  跳过（API失败）")
+            continue
 
-            # 随机选择增强方式
-            op_type = random.choice(operations)
+        virtual_children = build_virtual_children(comments)
 
-            if op_type in STANCE_PROMPTS:
-                prompt = STANCE_PROMPTS[op_type].format(content=content)
-                label = "支持" if op_type == "支持" else ("反对" if op_type == "反对" else "中立")
-            else:
-                prompt = SEMANTIC_PROMPTS[op_type].format(content=content)
-                label = item.get('label', '辟谣')
+        results.append({
+            "original": content,
+            "augmented": content,          # 主文本不变，虚拟节点挂在 children 里
+            "augmentation_type": "multi_stance_llm",
+            "label": item.get("label", "辟谣"),
+            "stance": "mixed",
+            "source": "qwen_virtual_replies",
+            "original_label": item.get("label", ""),
+            "virtual_children": virtual_children
+        })
 
-            # 调用API或使用模拟
-            if api_key:
-                new_content = call_qwen_api(prompt, api_key)
-                if not new_content:
-                    new_content = f"[{op_type}] {content[:50]}..."  # 模拟
-            else:
-                # 模拟数据（用于测试）
-                new_content = f"[{op_type}] {content}"
-                time.sleep(0.1)  # 避免太快
+        # 每条保存一次，防止中途崩溃丢数据
+        with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
 
-            if new_content and len(new_content) > 10:
-                augmented.append({
-                    'original': content,
-                    'augmented': new_content,
-                    'augmentation_type': op_type,
-                    'label': label,
-                    'stance': label,
-                    'source': 'weibo_crawled_augmented',
-                    'original_label': item.get('label', '')
-                })
+        time.sleep(0.5)  # 限流
 
-            # 避免API限流
-            if api_key:
-                time.sleep(0.5)
-
-        print(f"  本次迭代增加: {len(augmented)} 条")
-
-    return augmented
+    print(f"\n完成！共 {len(results)} 条，保存至: {OUTPUT_FILE}")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
-    print("="*60)
-    print("测试集数据增强")
-    print("="*60)
-
-    # 生成增强数据
-    augmented = generate_augmented_data(target_count=5000)
-
-    # 合并原始数据和增强数据
-    all_test_data = original_data.copy()
-
-    # 转换原始数据格式
-    for item in original_data:
-        all_test_data.append({
-            'original': item.get('content', ''),
-            'augmented': item.get('content', ''),
-            'augmentation_type': 'original',
-            'label': item.get('label', '辟谣'),
-            'stance': item.get('stance', '中立'),
-            'source': 'weibo_crawled',
-            'original_label': item.get('label', '')
-        })
-
-    # 添加增强数据
-    all_test_data.extend(augmented)
-
-    print(f"\n总计测试数据: {len(all_test_data)} 条")
-
-    # 保存
-    output_path = "E:/rumor_detection/data/test_dataset.json"
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(all_test_data, f, ensure_ascii=False, indent=2)
-
-    print(f"已保存到: {output_path}")
-    print("="*60)
+    main()

@@ -1,0 +1,43 @@
+<html lang="zh-cn"><head><meta charset="utf-8"><link rel="dns-prefetch" href="//h5.sinaimg.cn"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests"><link rel="icon" href="https://weibo.com/favicon.ico"><link rel="stylesheet" type="text/css" href="//h5.sinaimg.cn/m/reward-pc-kits/style.css?version=2.1.5"><script src="https://js.t.sinajs.cn/static/validate-loader.umd.cjs"></script><title>微博</title><script>
+      if (window.location.protocol !== 'https:') {
+        window.location.href = window.location.href.replace('http:', 'https:');
+      }
+    </script><script type="module" crossorigin src="https://h5.sinaimg.cn/m/weibo-pro-next/assets/index-CIN3zzks.js"></script><link rel="stylesheet" crossorigin href="https://h5.sinaimg.cn/m/weibo-pro-next/assets/index-BXYKRVhZ.css"></head><body>
+    <script>
+      try {
+        var CAPTCHA_TYPE = 'yidun';
+        window.CAPTCHA_TYPE = CAPTCHA_TYPE;
+        var dynamicLoader = window.ValidateLoader.dynamicLoader;
+
+        dynamicLoader
+          .load(CAPTCHA_TYPE)
+          .catch((err) => console.error('Dun preload failed', err));
+      } catch (e) {
+        console.log(e);
+      }
+    </script><script>
+      window.$VERSION = {
+        CLIENT: '3.0.0',
+        SERVER: 'v2026.03.16.1'
+      };
+      try{window.$CONFIG = {"serverTime":1773660493991,"showAriaEntrance":true,"enableAria":true,"enablePopLogin":false,"user":{"id":7495187246,"idstr":"7495187246","pc_new":0,"screen_name":"用户8027406942","profile_image_url":"https://tvax1.sinaimg.cn/default/images/default_avatar_male_50.gif?KID=imgbed,tva&Expires=1773671293&ssig=wTgiipFi90","profile_url":"/u/7495187246","verified":false,"verified_type":-1,"domain":"","weihao":"","status_total_counter":{"total_cnt_format":0,"comment_cnt":"0","repost_cnt":"0","like_cnt":"0","total_cnt":"0"},"avatar_large":"https://tvax1.sinaimg.cn/default/images/default_avatar_male_180.gif?KID=imgbed,tva&Expires=1773671293&ssig=73umNwBGmH","avatar_hd":"https://tvax1.sinaimg.cn/default/images/default_avatar_male_180.gif?KID=imgbed,tva&Expires=1773671293&ssig=73umNwBGmH","follow_me":false,"following":false,"mbrank":0,"mbtype":0,"v_plus":null,"user_ability":0,"planet_video":true,"description":"","location":"北京","gender":"m","followers_count":1,"followers_count_str":"1","friends_count":58,"statuses_count":0,"url":"","svip":0,"vvip":0,"cover_image_phone":"https://ww1.sinaimg.cn/crop.0.0.640.640.640/549d0121tw1egm1kjly3jj20hs0hsq4f.jpg","type":1,"user_limit":0,"icon_list":[],"watermark":{"markpos":1,"nick":"@用户8027406942"}},"uid":7495187246,"apmSampleRate":0.01,"isNormal":true,"flags":{"open_video_layer":1,"can_create_vote":false,"get_unfollow_message":false,"comment_approval":false,"content_auth":-1,"can_modify_visible":false,"can_welcome_layer":1,"mcomment_bubble":0,"enable_new_viewer":false,"back_v6":0,"broadcast":true,"text_extend":false,"text_optima":false,"pic_text":false,"date":1773660493991,"olympic":{"enable":false,"icon":false},"idea":false,"expire":false,"pc_next":true,"PC_grey":false,"pc_video_rt":false,"video_publish_1080p_guide":"false","pc_publisher_detector":false,"experience_dash":true,"pc_comment_pics":"false","block_frequency":0,"block_type":2,"PC_apm_samplerate":0,"wedance_qwen":0,"wedance":0,"wegent_ai_entrance":false,"statement":{"mblog_statement_title":"选择内容声明","mblog_statement_tips":["1. 如属于自行拍摄的图片、视频等内容，请选择“内容为自主创作”，并在博文中标注拍摄时间、地点等相关信息。","2. 发布内容涉及国内外时事、公共政策、社会事件等领域，需在博文中标注内容来源：如引用他人所发布内容，需选择”内容为转载”；如引用旧闻旧事，需标注事件发生的时间、地点等信息。","3. 如发布使用AI技术生成的图片、视频，需选择“内容由AI生成”。","4. 如发布含有虚构情节、剧情演绎内容，需选择“内容为虚构演绎”。"],"mblog_statement_list":[{"type":0,"composer_show":"","name":"无","left_icon":"https://d.sinaimg.cn/prd/1008/253/2025/10/16/none_big_icon.png","selected_icon":"https://d.sinaimg.cn/prd/1008/253/2025/10/16/none_small_icon.png"},{"type":4,"composer_show":"自主创作","name":"内容为自主创作","left_icon":"https://d.sinaimg.cn/prd/1008/253/2025/10/16/autonomy_big_icon.png","selected_icon":"https://d.sinaimg.cn/prd/1008/253/2025/10/16/autonomy_small_icon.png"},{"type":3,"composer_show":"转载","name":"内容为转载","left_icon":"https://d.sinaimg.cn/prd/1008/253/2025/10/16/repost_big_icon.png","selected_icon":"https://d.sinaimg.cn/prd/1008/253/2025/10/16/repost_small_icon.png"},{"type":1,"composer_show":"AI生成","name":"内容由AI生成","left_icon":"https://d.sinaimg.cn/prd/1008/253/2025/10/16/AI_big_icon.png","selected_icon":"https://d.sinaimg.cn/prd/1008/253/2025/10/16/AI_small_icon.png"},{"type":2,"composer_show":"虚构演绎","name":"内容为虚构演绎","left_icon":"https://d.sinaimg.cn/prd/1008/253/2025/10/16/imaginary_big_icon.png","selected_icon":"https://d.sinaimg.cn/prd/1008/253/2025/10/16/imaginary_small_icon.png"}]},"settings":{"message":{"at_me":3,"comment":3,"in_like":2,"groupchat_notify_receive":2,"chat_group_notify":2}},"audio_auth":0},"loginHeader":{"poster":"https://a.sinaimg.cn/mintra/pic/2112130400/18weibo_login.png","src":"https://a.sinaimg.cn/mintra/pic/2112130543/weibo_login.mp4"}};}catch(e){window.$CONFIG = {};}
+      const s = document.createElement('script');
+      s.src = 'https://i.sso.sina.com.cn/js/qrcode_login_v2.js';
+      document.body.appendChild(s);
+    </script><div id="app"></div>
+    <script defer src="https://static.geetest.com/v4/gt4.js"></script><script>
+      try {
+        if (window.$CONFIG.enableAria) {
+          const s = document.createElement('script');
+          s.defer = true;
+          s.src = '//a.sinaimg.cn/mintra/pic/2201111119/wza/aria.js?appid=dc65fe7d7d2aaf372b1ac9945ffbd093';
+          document.body.appendChild(s);
+        }
+      } catch (e) {}
+      try {
+        const s = document.createElement('script');
+        s.defer = true;
+        s.src = '//a.sinaimg.cn/mintra/pic/2406250331/48po.js';
+        document.body.appendChild(s);
+      } catch (e) {}
+    </script><script src="//h5.sinaimg.cn/m/reward-pc-kits/sdk.js?version=2.1.5" defer></script></body></html>

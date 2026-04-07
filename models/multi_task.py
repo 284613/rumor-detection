@@ -482,24 +482,57 @@ class PositionalEncoding(nn.Module):
 
 # ==================== 训练器类 ====================
 
+ALPHA = 0.5   # 立场损失权重
+BETA  = 0.3   # 虚拟节点立场损失权重（消融实验调此值：0, 0.1, 0.3, 0.5）
+
+
+def compute_virtual_stance_loss(
+    stance_logits: torch.Tensor,
+    stance_labels: torch.Tensor,
+    is_virtual: torch.Tensor,
+    criterion: nn.Module
+) -> torch.Tensor:
+    """
+    仅对虚拟节点（is_virtual=True）计算立场损失。
+
+    Args:
+        stance_logits: (N, num_stance_classes)
+        stance_labels: (N,) long tensor
+        is_virtual:    (N,) bool tensor，True = 虚拟节点
+        criterion:     CrossEntropyLoss (reduction='none' 推荐)
+
+    Returns:
+        scalar loss（若无虚拟节点则返回 0.0）
+    """
+    virtual_idx = is_virtual.nonzero(as_tuple=True)[0]
+    if virtual_idx.numel() == 0:
+        return torch.tensor(0.0, device=stance_logits.device, requires_grad=True)
+    v_logits = stance_logits[virtual_idx]
+    v_labels = stance_labels[virtual_idx]
+    return criterion(v_logits, v_labels)
+
+
 class MultiTaskTrainer:
     """
     多任务学习训练器
     """
-    
+
     def __init__(self,
                  model: nn.Module,
                  optimizer: torch.optim.Optimizer,
                  device: torch.device,
-                 task_weights: Tuple[float, float] = (1.0, 1.0),
-                 loss_type: str = 'weighted_sum'):
-        
+                 task_weights: Tuple[float, float] = (1.0, ALPHA),
+                 loss_type: str = 'weighted_sum',
+                 beta: float = BETA):
+
         self.model = model
         self.optimizer = optimizer
         self.device = device
-        
+        self.beta = beta
+
         # 多任务损失
         self.criterion = nn.CrossEntropyLoss()
+        self.criterion_none = nn.CrossEntropyLoss(reduction='none')
         self.multi_task_loss = MultiTaskLoss(
             num_tasks=2,
             loss_type=loss_type,
@@ -522,16 +555,28 @@ class MultiTaskTrainer:
             
             rumor_labels = batch['rumor_labels'].to(self.device)
             stance_labels = batch['stance_labels'].to(self.device)
-            
+            is_virtual = batch.get('is_virtual', None)
+            if is_virtual is not None:
+                is_virtual = is_virtual.to(self.device)
+
             # 前向传播
             outputs = self.model(input_ids, attention_mask, task='both')
-            
+
             # 计算各任务损失
             loss_rumor = self.criterion(outputs['rumor_logits'], rumor_labels)
             loss_stance = self.criterion(outputs['stance_logits'], stance_labels)
-            
-            # 多任务损失
+
+            # 虚拟节点立场损失
+            if is_virtual is not None:
+                loss_virtual_stance = compute_virtual_stance_loss(
+                    outputs['stance_logits'], stance_labels, is_virtual, self.criterion
+                )
+            else:
+                loss_virtual_stance = torch.tensor(0.0, device=self.device)
+
+            # 多任务损失（含虚拟节点项）
             total_loss_batch, loss_info = self.multi_task_loss((loss_rumor, loss_stance))
+            total_loss_batch = total_loss_batch + self.beta * loss_virtual_stance
             
             # 反向传播
             self.optimizer.zero_grad()

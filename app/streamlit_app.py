@@ -6,6 +6,39 @@
 
 import streamlit as st
 import random
+import json
+import hashlib
+from pathlib import Path
+
+CACHE_DIR = Path("E:/rumor_detection/data/.aug_cache")
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@st.cache_data(show_spinner=False)
+def load_augmented_cache() -> dict:
+    """加载已完成的增强数据缓存，用 original[:50] 作为键"""
+    aug_file = Path("E:/rumor_detection/data/augmented_qwen.json")
+    if not aug_file.exists():
+        return {}
+    with open(aug_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return {item["original"][:50]: item for item in data}
+
+
+def get_cached_virtual_children(content: str, aug_cache: dict) -> list:
+    """从本地缓存获取虚拟子节点，无需重复调用 API"""
+    key = content[:50]
+    item = aug_cache.get(key)
+    if item:
+        return item.get("virtual_children", [])
+
+    # 检查磁盘 .aug_cache/ 目录
+    disk_key = hashlib.md5(content.encode("utf-8")).hexdigest()
+    disk_file = CACHE_DIR / f"{disk_key}.json"
+    if disk_file.exists():
+        with open(disk_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return []
 
 # 设置页面配置
 st.set_page_config(
