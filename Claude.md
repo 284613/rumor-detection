@@ -31,7 +31,8 @@ E:\rumor_detection\
 │   └── crawler/cleaner.py           # 微博数据清洗
 │
 ├── scripts/
-│   ├── augment_test_data.py         # ★ Qwen 多立场增强主脚本（含断点续跑、磁盘缓存）
+│   ├── augment_test_data.py         # ★ MiniMax 多立场增强脚本（processed_crawled用，含断点续跑）
+│   ├── augment_ced_data.py          # ★ CED 专用增强脚本（待创建，生成 ced_early_augmented.json）
 │   ├── build_ced_propagation.py     # ★ 从 CED_Dataset 构建三份传播树数据集
 │   ├── prepare_test_data.py         # 数据集划分（85/7/8）
 │   └── training/
@@ -213,6 +214,22 @@ repost 文件格式（list，utf-8编码）：
 运行：`python scripts/training/run_ablation.py`
 结果输出：`data/ablation_results.json` + `data/ablation_results.csv`
 
+### 首轮消融结果（2026-04-08，Colab，EPOCHS=3）
+
+| 实验 | Acc(%) | F1-谣言 | F1-真实 | Stance-F1 | 备注 |
+|------|--------|---------|---------|-----------|------|
+| A | 98.39 | 0.9918 | 0.6233 | 0.3919 | F1-真实低，类别不平衡 |
+| B | 79.88 | 0.7866 | 0.8096 | 0.3333 | baseline |
+| C | 80.03 | 0.7800 | 0.8172 | 0.3333 | 增强效果不显著 |
+| D | 78.88 | 0.7675 | 0.8065 | 0.3333 | — |
+
+### 已知问题（待修复后重跑）
+
+1. **C/D 虚拟节点=0**：`ced_early_augmented.json` 未生成（Qwen/MiniMax 增强未对 CED 数据执行），导致 C/D 与 B 数据完全相同
+2. **Stance-F1 恒为 0.3333**：CED 节点无 stance 字段，全部默认 "中立"→标签退化为单类。**修复方案**：stance loss 仅对虚拟节点（is_virtual=True）计算，真实节点跳过
+3. **实验A 类别不平衡**：谣言树展开后节点远多于非谣言，需加 class weight
+4. **Epochs 不足**：3 epoch 训练 acc 仍在上升，需增至 5+ 并加 early stopping
+
 ---
 
 ## API 与环境
@@ -281,9 +298,10 @@ MULTI_STANCE_PROMPT = """你是社交媒体用户行为模拟器。
 - 虚拟节点 `is_virtual=True` 字段必须在整个数据流中完整传递，不要在任何中间处理步骤丢失
 - Windows 路径用 `os.path.join()` 或 `pathlib.Path`，不要硬编码正斜杠
 - Streamlit 缓存目录 `data/.aug_cache/` 已加入 `.gitignore`，不会上传
-- `augmented_qwen.json` 目前仅31条（来自 processed_crawled.json），CED 数据尚未跑 Qwen 增强
-- `ced_early_augmented.json` 的 virtual_children 目前为空，需对 CED 文本单独跑 `augment_test_data.py`
+- `augmented_qwen.json` 目前仅31条（来自 processed_crawled.json），CED 数据尚未跑增强
+- `ced_early_augmented.json` 尚未生成，需创建 `scripts/augment_ced_data.py` 专门对 CED 早期树跑 MiniMax 增强
+- 消融实验 stance loss 必须仅对 `is_virtual=True` 节点计算，CED 真实节点无 stance 标注
 
 ---
 
-*最后更新：2026-04-07*
+*最后更新：2026-04-08*
