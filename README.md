@@ -20,7 +20,8 @@ rumor_detection/
 ├── models/             # 模型定义 (BERT, TextCNN, GNN等) 及训练好的权重
 ├── reports/            # 汇报文档、中期报告及 PPT (含归档)
 ├── scripts/            # 核心执行脚本
-│   ├── training/       # 训练脚本 (BERT, TextCNN, CNN-GRU-Attn)
+│   ├── training/       # 训练脚本 (BERT, TextCNN, CNN-GRU-Attn, 消融实验)
+│   ├── augment_test_data_fast.py # 异步提速的虚拟节点生成脚本
 │   ├── process_crawled.py    # 原始爬虫数据处理
 │   ├── prepare_test_data.py  # 测试数据划分与准备
 │   └── test_all_models.py    # 多模型横向评估对比

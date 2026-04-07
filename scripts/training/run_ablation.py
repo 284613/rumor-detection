@@ -43,8 +43,8 @@ from utils.early_stage_simulator import batch_process_dataset
 
 # ──────────────────────── 固定超参 ────────────────────────
 SEED       = 42
-EPOCHS     = 5
-BATCH_SIZE = 4     # RTX 3060 6GB；OOM 时自动回退到 2
+EPOCHS     = 3     # 调整为 3 以缩短耗时
+BATCH_SIZE = 2     # RTX 3060 6GB；降低以避免 OOM
 LR         = 1e-5
 
 random.seed(SEED)
@@ -57,7 +57,7 @@ MODEL_DIR = os.path.join(PROJECT_ROOT, 'models')
 
 # 继承 train_bert.py 的 Config 基本路径
 BERT_MODEL  = os.path.join(MODEL_DIR, 'bert_base_chinese')
-MAX_LEN     = 128
+MAX_LEN     = 100  # 降低 MAX_LEN 以节省显存
 HIDDEN_DIM  = 256
 DROPOUT     = 0.3
 TASK_WEIGHTS = (1.0, ALPHA)   # rumor : stance

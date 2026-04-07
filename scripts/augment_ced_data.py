@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-多立场虚拟回复增强脚本
-使用 Qwen API 对 processed_crawled.json 生成含 virtual_children 的增强数据
-输出格式：augmented_qwen.json（含 virtual_children 字段）
+CED 传播树多立场虚拟回复增强脚本
+使用 Qwen API 对 ced_full.json 生成含 virtual_children 的增强数据
+输出格式：也保存到 augmented_qwen.json，与现有条目合并
 """
 import os
 import json
@@ -25,7 +25,7 @@ client = anthropic.Anthropic(
 )
 
 DATA_DIR = Path("E:/rumor_detection/data")
-INPUT_FILE = DATA_DIR / "processed_crawled.json"
+INPUT_FILE = DATA_DIR / "ced_full.json"
 OUTPUT_FILE = DATA_DIR / "augmented_qwen.json"
 CACHE_DIR = DATA_DIR / ".aug_cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -134,30 +134,40 @@ def build_virtual_children(comments: list) -> list:
 
 def main():
     print("=" * 60)
-    print("Qwen 多立场虚拟回复增强")
+    print("CED 数据 Qwen 多立场虚拟回复增强")
     print("=" * 60)
 
     with open(INPUT_FILE, "r", encoding="utf-8") as f:
-        original_data = json.load(f)
-    print(f"原始数据: {len(original_data)} 条")
+        ced_data = json.load(f)
+    print(f"CED 原始数据: {len(ced_data)} 条")
 
-    # 如果已有输出文件，加载已完成的条目（断点续跑）
-    done_ids = set()
+    # 如果已有输出文件，加载已完成的条目
     results = []
     if OUTPUT_FILE.exists():
         with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
             results = json.load(f)
-        done_ids = {r.get("original", "")[:50] for r in results}
+        done_contents = {r.get("original", "")[:50] for r in results}
         print(f"已完成: {len(results)} 条，继续增量处理")
+    else:
+        done_contents = set()
 
-    for idx, item in enumerate(original_data):
-        content = item.get("content", "").strip()
+    added_count = 0
+    # 我们只对 CED 数据中的前 100 条进行增强，以便快速看到效果（全量 3387 条耗时太久）
+    # 实际运行可以根据需要放开限制
+    TARGET_COUNT = 100 
+    
+    for idx, (root_id, item) in enumerate(ced_data.items()):
+        content = item.get("text", "").strip()
         if not content or len(content) < 10:
             continue
-        if content[:50] in done_ids:
+        if content[:50] in done_contents:
             continue
 
-        print(f"[{idx+1}/{len(original_data)}] 处理: {content[:40]}...")
+        if added_count >= TARGET_COUNT:
+            print(f"已达到目标数量 ({TARGET_COUNT})，停止。")
+            break
+
+        print(f"[{added_count+1}/{TARGET_COUNT}] 处理 CED [{root_id}]: {content[:40]}...")
         comments = call_minimax(content)
 
         if comments is None:
@@ -165,25 +175,31 @@ def main():
             continue
 
         virtual_children = build_virtual_children(comments)
+        
+        # 转换 label: CED 1=谣言, 0=非谣言；augmented_qwen 格式用 '辟谣'/'真实'/'虚假'
+        label_raw = item.get("label", 0)
+        label_str = "虚假" if label_raw == 1 else "真实"
 
         results.append({
             "original": content,
-            "augmented": content,          # 主文本不变，虚拟节点挂在 children 里
+            "augmented": content,
             "augmentation_type": "multi_stance_llm",
-            "label": item.get("label", "辟谣"),
+            "label": label_str,
             "stance": "mixed",
             "source": "qwen_virtual_replies",
-            "original_label": item.get("label", ""),
+            "original_label": label_str,
             "virtual_children": virtual_children
         })
 
-        # 每条保存一次，防止中途崩溃丢数据
+        added_count += 1
+
+        # 每条保存一次
         with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
 
-        time.sleep(0.5)  # 限流
+        time.sleep(0.5)
 
-    print(f"\n完成！共 {len(results)} 条，保存至: {OUTPUT_FILE}")
+    print(f"\n完成！目前共 {len(results)} 条，保存至: {OUTPUT_FILE}")
     print("=" * 60)
 
 
