@@ -200,6 +200,92 @@ def simulate_early_stage(
     return samples
 
 
+# ─────────────────────────── 批量生成消融数据集 ───────────────────────────
+
+def batch_process_dataset(
+    propagation_trees_path: str,
+    augmented_qwen_path: str,
+    output_early_real: str,
+    output_early_augmented: str,
+    max_depth: int = 2,
+    max_nodes: int = 5,
+) -> None:
+    """
+    从传播树 + Qwen 增强数据批量生成两个消融实验数据文件。
+
+    output_early_real:       极早期截断，无虚拟节点（实验 B/D 用）
+    output_early_augmented:  极早期截断，含虚拟节点（实验 C/D 用）
+
+    每条记录格式：
+    {
+        "root_id": str,
+        "label": str,
+        "text": str,         # 节点文本
+        "stance": str,       # 立场标签（虚拟节点有）
+        "is_virtual": bool
+    }
+    (一条传播树展开为多条记录：根节点 + 所有子节点)
+    """
+    prop_path = Path(propagation_trees_path)
+    aug_path = Path(augmented_qwen_path)
+
+    if not prop_path.exists():
+        raise FileNotFoundError(f"传播树文件不存在: {prop_path}")
+
+    with open(prop_path, "r", encoding="utf-8") as f:
+        prop_data = json.load(f)
+
+    aug_index: Dict[str, Dict] = {}
+    if aug_path.exists():
+        with open(aug_path, "r", encoding="utf-8") as f:
+            aug_data = json.load(f)
+        aug_index = {item["original"][:50]: item for item in aug_data}
+
+    if isinstance(prop_data, dict):
+        items = list(prop_data.items())
+    else:
+        items = [(str(i), v) for i, v in enumerate(prop_data)]
+
+    real_records: List[Dict] = []
+    augmented_records: List[Dict] = []
+
+    for root_id, tree in items:
+        root_text = tree.get("text", "")
+        aug_item = aug_index.get(root_text[:50])
+        label = aug_item.get("label", "") if aug_item else ""
+        virtual_children = aug_item.get("virtual_children", []) if aug_item else []
+
+        # 截断真实树
+        truncated = truncate_tree(tree, max_depth=max_depth, max_nodes=max_nodes)
+
+        # ── early_real：展开截断树的所有节点（无虚拟节点）
+        def _flatten(node: Dict, is_virt: bool = False) -> List[Dict]:
+            rows = [{
+                "root_id": root_id,
+                "label": label,
+                "text": node.get("text", ""),
+                "stance": node.get("stance", "中立"),
+                "is_virtual": is_virt,
+            }]
+            for child in node.get("children", []):
+                rows.extend(_flatten(child, child.get("is_virtual", False)))
+            return rows
+
+        real_records.extend(_flatten(truncated, False))
+
+        # ── early_augmented：截断树 + 挂载虚拟节点后展开
+        aug_tree = attach_virtual_children(truncated, virtual_children)
+        augmented_records.extend(_flatten(aug_tree, False))
+
+    with open(output_early_real, "w", encoding="utf-8") as f:
+        json.dump(real_records, f, ensure_ascii=False, indent=2)
+    print(f"[early_real]       已保存 {len(real_records)} 条 -> {output_early_real}")
+
+    with open(output_early_augmented, "w", encoding="utf-8") as f:
+        json.dump(augmented_records, f, ensure_ascii=False, indent=2)
+    print(f"[early_augmented]  已保存 {len(augmented_records)} 条 -> {output_early_augmented}")
+
+
 # ─────────────────────────── 快速测试 ───────────────────────────
 
 if __name__ == "__main__":
