@@ -252,7 +252,10 @@ def batch_process_dataset(
     for root_id, tree in items:
         root_text = tree.get("text", "")
         aug_item = aug_index.get(root_text[:50])
-        label = aug_item.get("label", "") if aug_item else ""
+        # 优先从树本身读取 label，其次从增强数据
+        label = tree.get("label", "")
+        if not label and aug_item:
+            label = aug_item.get("label", "")
         virtual_children = aug_item.get("virtual_children", []) if aug_item else []
 
         # 截断真实树

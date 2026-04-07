@@ -62,8 +62,10 @@ HIDDEN_DIM  = 256
 DROPOUT     = 0.3
 TASK_WEIGHTS = (1.0, ALPHA)   # rumor : stance
 
-# 消融数据文件路径
-PROP_TREES_PATH       = os.path.join(DATA_DIR, 'propagation_trees.json')
+# 消融数据文件路径 — 使用 CED 数据（含 text/label/children）
+CED_FULL_PATH         = os.path.join(DATA_DIR, 'ced_full.json')
+CED_EARLY_PATH        = os.path.join(DATA_DIR, 'ced_early.json')
+CED_EARLY_AUG_PATH    = os.path.join(DATA_DIR, 'ced_early_augmented.json')
 AUG_QWEN_PATH         = os.path.join(DATA_DIR, 'augmented_qwen.json')
 EARLY_REAL_PATH       = os.path.join(DATA_DIR, 'ablation_early_real.json')
 EARLY_AUGMENTED_PATH  = os.path.join(DATA_DIR, 'ablation_early_augmented.json')
@@ -92,58 +94,52 @@ def clean_text(text: str) -> str:
 
 
 def _load_full_chinese_data() -> Tuple[List[str], List[int], List[int], List[bool]]:
-    """加载完整中文数据（实验 A），is_virtual 全为 False"""
-    import pandas as pd
+    """加载 CED 完整传播树数据（实验 A），展开为行格式，is_virtual 全为 False"""
+    return _load_ced_tree_file(CED_FULL_PATH)
+
+
+def _ced_label_to_int(label_raw) -> int:
+    """CED label 转换：1=谣言→0, 0=非谣言→1（与 evaluate target_names 一致：谣言(0), 真实(1)）"""
+    LABEL_MAP = {
+        1: 0, 0: 1,               # CED 数字格式
+        '1': 0, '0': 1,           # 字符串格式
+        '辟谣': 0, '虚假': 0, '未证实': 0, '谣言': 0,
+        '真实': 1,
+    }
+    return LABEL_MAP.get(label_raw, 0)
+
+
+def _load_ced_tree_file(path: str) -> Tuple[List[str], List[int], List[int], List[bool]]:
+    """加载 CED 嵌套树格式文件，展开为行格式"""
+    with open(path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
     texts, labels, stances, is_virtual = [], [], [], []
-
-    def _add(t, l, s, v=False):
-        t = clean_text(t)
-        if len(t) > 5:
-            texts.append(t); labels.append(l); stances.append(s); is_virtual.append(v)
-
-    try:
-        import pandas as pd
-        df = pd.read_csv(os.path.join(DATA_DIR, 'weibo1_rumor.tsv'), sep='\t', header=None)
-        for _, row in df.iterrows():
-            _add(str(row[1]), 0 if int(row[0]) == 0 else 1, 2)
-    except Exception:
-        pass
-
-    try:
-        with open(os.path.join(DATA_DIR, 'processed_crawled.json'), 'r', encoding='utf-8') as f:
-            for item in json.load(f):
-                lbl = 1 if item.get('label') in ['辟谣', '真实'] else 0
-                _add(item.get('content', ''), lbl, STANCE_LABEL_MAP.get(item.get('stance'), 2))
-    except Exception:
-        pass
-
-    try:
-        rumor_path = os.path.join(DATA_DIR, 'Chinese_Rumor_Dataset', 'rumors_v170613.json')
-        with open(rumor_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                if line.strip():
-                    obj = json.loads(line)
-                    _add(obj.get('rumorText', ''), 0, 2)
-    except Exception:
-        pass
-
-    # 去重
     seen = set()
-    out_t, out_l, out_s, out_v = [], [], [], []
-    for t, l, s, v in zip(texts, labels, stances, is_virtual):
-        if t not in seen:
-            seen.add(t)
-            out_t.append(t); out_l.append(l); out_s.append(s); out_v.append(v)
 
-    return out_t, out_l, out_s, out_v
+    for root_id, tree in data.items():
+        lbl = _ced_label_to_int(tree.get('label', ''))
+
+        def _flatten(node, is_virt=False):
+            t = clean_text(node.get('text', ''))
+            if t and len(t) > 5 and t not in seen:
+                seen.add(t)
+                texts.append(t)
+                labels.append(lbl)
+                stances.append(STANCE_LABEL_MAP.get(node.get('stance', '中立'), 2))
+                is_virtual.append(is_virt)
+            for child in node.get('children', []):
+                _flatten(child, child.get('is_virtual', False))
+            for child in node.get('virtual_children', []):
+                _flatten(child, True)
+
+        _flatten(tree)
+
+    return texts, labels, stances, is_virtual
 
 
 def _load_ablation_file(path: str) -> Tuple[List[str], List[int], List[int], List[bool]]:
-    """加载 ablation_early_*.json，提取 text/label/stance/is_virtual"""
-    LABEL_MAP = {
-        '辟谣': 1, '真实': 1, '虚假': 0, '未证实': 0, '谣言': 0,
-        'true': 1, 'false': 0, 'unverified': 0,
-    }
+    """加载 ablation_early_*.json（行格式），提取 text/label/stance/is_virtual"""
     with open(path, 'r', encoding='utf-8') as f:
         records = json.load(f)
 
@@ -156,8 +152,7 @@ def _load_ablation_file(path: str) -> Tuple[List[str], List[int], List[int], Lis
         if t in seen:
             continue
         seen.add(t)
-        lbl_raw = r.get('label', '')
-        lbl = LABEL_MAP.get(lbl_raw, 0)
+        lbl = _ced_label_to_int(r.get('label', ''))
         stance = STANCE_LABEL_MAP.get(r.get('stance', '中立'), 2)
         texts.append(t)
         labels.append(lbl)
@@ -177,11 +172,9 @@ def load_data(data_mode: str):
     if data_mode == 'full':
         return _load_full_chinese_data()
     elif data_mode == 'early_real':
-        _ensure_ablation_files()
-        return _load_ablation_file(EARLY_REAL_PATH)
+        return _load_ced_tree_file(CED_EARLY_PATH)
     elif data_mode == 'early_augmented':
-        _ensure_ablation_files()
-        return _load_ablation_file(EARLY_AUGMENTED_PATH)
+        return _load_ced_tree_file(CED_EARLY_AUG_PATH)
     else:
         raise ValueError(f"未知 data_mode: {data_mode}")
 
@@ -354,7 +347,9 @@ def run_one_experiment(
 
     # 1. 加载数据
     texts, labels, stances, is_virtual = load_data(data_mode)
-    print(f"  数据总量: {len(texts)} 条  虚拟节点: {sum(is_virtual)}")
+    from collections import Counter
+    label_dist = Counter(labels)
+    print(f"  数据总量: {len(texts)} 条  虚拟节点: {sum(is_virtual)}  标签分布: 谣言(0)={label_dist.get(0,0)} 真实(1)={label_dist.get(1,0)}")
 
     # 2. 划分
     train_t, val_t, train_l, val_l, train_s, val_s, train_v, val_v = train_test_split(
