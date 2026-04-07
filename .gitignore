@@ -35,7 +35,18 @@ venv/
 ENV/
 
 # Data and Models (Large Files)
-data/
+data/*.json
+data/*.tsv
+data/*.csv
+data/*.zip
+data/*.tar
+data/*.gz
+data/Chinese_Rumor_Dataset/
+data/ChineseRumorDataset-main/
+data/pheme-rnr-dataset/
+data/rumor_detection_acl2017/
+!data/README.md
+!data/README
 models/*.pth
 models/bert_base_chinese/
 *.log
