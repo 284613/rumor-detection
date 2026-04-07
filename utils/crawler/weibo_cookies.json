@@ -1,0 +1,92 @@
+[
+    {
+        "domain": ".weibo.com",
+        "expirationDate": 1805190290.989876,
+        "hostOnly": false,
+        "httpOnly": false,
+        "name": "SUBP",
+        "path": "/",
+        "sameSite": "no_restriction",
+        "secure": true,
+        "session": false,
+        "storeId": null,
+        "value": "0033WrSXqPxfM725Ws9jqgMF55529P9D9W5f6Ex7VA9dRZSBcymJ_uDp5NHD95QNSh.feKnNeoBcWs4DqcjMi--NiK.Xi-2Ri--ciKnRi-zN1h5ES0B7So.Xentt"
+    },
+    {
+        "domain": ".weibo.com",
+        "expirationDate": 1808213943.692679,
+        "hostOnly": false,
+        "httpOnly": true,
+        "name": "SCF",
+        "path": "/",
+        "sameSite": "no_restriction",
+        "secure": true,
+        "session": false,
+        "storeId": null,
+        "value": "Ai5XfcQR063v4gYTBvh6vCP6lbIu17kchIE50Ak5eR_ozMevqLCVndp_D4j1E9c8S-74zowEQBS2WJ3tBZ616nA."
+    },
+    {
+        "domain": "www.weibo.com",
+        "expirationDate": 1773746288.668541,
+        "hostOnly": true,
+        "httpOnly": true,
+        "name": "WBPSESS",
+        "path": "/",
+        "sameSite": null,
+        "secure": true,
+        "session": false,
+        "storeId": null,
+        "value": "qvYEC71a2NMRYt9lhYPJCU3W0f6Ht0RTu0TX6qY6R2FxOwo0SOdt5Njs5Al4W7WmMU1G2EO541FBI-qgJb9JzeCYWriAm_FG8pBz-v7YZhM9kJEMTO6GBhU5OMPTicGdCRUSrSokAS7LyXB5BPu6Lw=="
+    },
+    {
+        "domain": ".weibo.com",
+        "expirationDate": 1805190290.989558,
+        "hostOnly": false,
+        "httpOnly": true,
+        "name": "SUB",
+        "path": "/",
+        "sameSite": "no_restriction",
+        "secure": true,
+        "session": false,
+        "storeId": null,
+        "value": "_2A25Es6FCDeRhGeFK4lcQ-CnOzzqIHXVnsLyKrDV8PUNbmtAYLXXdkW9NQtSSwXt15vSFvXTj6JqfFuZJvUmU3toF"
+    },
+    {
+        "domain": ".weibo.com",
+        "expirationDate": 1776246290.990053,
+        "hostOnly": false,
+        "httpOnly": false,
+        "name": "ALF",
+        "path": "/",
+        "sameSite": null,
+        "secure": true,
+        "session": false,
+        "storeId": null,
+        "value": "02_1776246290"
+    },
+    {
+        "domain": ".weibo.com",
+        "expirationDate": 1773661687.051426,
+        "hostOnly": false,
+        "httpOnly": false,
+        "name": "PC_TOKEN",
+        "path": "/",
+        "sameSite": null,
+        "secure": true,
+        "session": false,
+        "storeId": null,
+        "value": "69d9e124c7"
+    },
+    {
+        "domain": "www.weibo.com",
+        "hostOnly": true,
+        "httpOnly": false,
+        "name": "XSRF-TOKEN",
+        "path": "/",
+        "sameSite": null,
+        "secure": true,
+        "session": true,
+        "storeId": null,
+        "value": "exy_NW6q6sHMIOPPV4J5C1wk"
+    }
+]

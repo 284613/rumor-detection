@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  deeplearning:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: rumor-detection-env
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    stdin_open: true
+    tty: true
