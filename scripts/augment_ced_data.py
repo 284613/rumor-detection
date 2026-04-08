@@ -149,8 +149,8 @@ def main():
     failed  = 0
 
     for idx, (root_id, tree) in enumerate(trees.items()):
-        # 已处理（有 virtual_children 字段）则跳过
-        if root_id in result and "virtual_children" in result[root_id]:
+        # 已处理（virtual_children 非空）则跳过；空列表说明之前失败，需重试
+        if root_id in result and result[root_id].get("virtual_children"):
             done += 1
             continue
 
