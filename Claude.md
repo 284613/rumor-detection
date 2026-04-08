@@ -8,6 +8,25 @@
 
 基于"极早期冷启动场景"的谣言检测系统。核心创新：用 LLM（Qwen API）生成**多立场虚拟回复**，补全传播树在谣言爆发初期（≤3条真实回复）的结构稀疏问题，再送入 Tree-LSTM 进行分类。
 
+## 虚拟节点生成技术说明 (LLM Generation)
+
+### 1. 技术来源与数据来源
+- **核心模型**: **MiniMax-M2.5-highspeed** (由于 Qwen 额度耗尽，已全面切换至 MiniMax)。
+- **接口协议**: Anthropic 兼容模式 (Base URL: `api.minimaxi.com/anthropic`)。
+- **原始数据集**: **CED_Dataset** (综合中文谣言数据集)。
+- **生成规模**: 对 CED 截断后的 **2548** 条样本进行增强，共生成 **15,288** 个虚拟节点。
+
+### 2. 生成策略 (Prompt Design)
+- **模拟角色**: `社交媒体用户行为模拟器`。
+- **输入数据**: 仅输入微博原帖（root）内容。
+- **立场平衡**: 强制要求生成 `[2*支持, 2*反对, 2*中立]` 的均衡立场组合，以补足谣言爆发前夕真实评论在立场上的分布缺失。
+- **结构化输出**: 严格输出 JSON 格式，包含 `comments` 列表，确保能无缝挂载至 `PropagationTree`。
+
+### 3. 数据可靠性保障
+- **磁盘缓存**: 采用 `data/.aug_cache/` MD5 缓存机制（Key 为 `微博内容` 的哈希），支持断点续传。
+- **自动校验**: 脚本内置立场集合校验（必须包含三类立场），校验失败会自动重试。
+- **信号衰减**: 在 `RelationAwareTreeLSTMCell` 中对所有来自 MiniMax 的虚拟节点应用 **0.7** 的隐状态衰减系数。
+
 ---
 
 ## 目录结构（只列关键文件）
@@ -218,10 +237,10 @@ repost 文件格式（list，utf-8编码）：
 ## API 与环境
 
 ```python
-# Qwen API
-API_KEY = "sk-2ddddb50a0f84f01a5b155afb28de024"
-BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-
+# MiniMax API (Token Plan)
+MINIMAX_MODEL = "MiniMax-M2.5-highspeed"
+MINIMAX_BASE_URL = "https://api.minimaxi.com/anthropic"
+```
 # 硬件
 GPU = "RTX 3060 Laptop, 6GB VRAM"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -236,7 +255,7 @@ DATA_DIR     = "E:/rumor_detection/data"
 
 ---
 
-## Qwen Prompt 规范（核心创新，不要改动格式）
+## Qwen / MiniMax Prompt 规范（核心创新，不要改动格式）
 
 ```python
 MULTI_STANCE_PROMPT = """你是社交媒体用户行为模拟器。
@@ -275,15 +294,16 @@ MULTI_STANCE_PROMPT = """你是社交媒体用户行为模拟器。
 
 ---
 
-## 常见注意事项
+## 常见注意事项 & 最新进展 (2026-04-07)
 
-- `propagation_trees.json` 迭代方式视实际格式而定（可能是 list 也可能是 dict），改代码前先 `print(type(data))` 确认
-- 虚拟节点 `is_virtual=True` 字段必须在整个数据流中完整传递，不要在任何中间处理步骤丢失
-- Windows 路径用 `os.path.join()` 或 `pathlib.Path`，不要硬编码正斜杠
-- Streamlit 缓存目录 `data/.aug_cache/` 已加入 `.gitignore`，不会上传
-- `augmented_qwen.json` 目前仅31条（来自 processed_crawled.json），CED 数据尚未跑 Qwen 增强
-- `ced_early_augmented.json` 的 virtual_children 目前为空，需对 CED 文本单独跑 `augment_test_data.py`
+- **Colab 迁移与优化**：已为 `run_ablation.py` 做了深度优化以适配 Colab T4 GPU（15GB）。包含使用 `collate_fn` 实现数据批量 On-the-fly Tokenization（解决内存 OOM 爆满和 CPU 空转死锁问题），并将安全 `BATCH_SIZE` 设置为了 `64`。
+- **CED 标签映射陷阱**：在 CED 数据集中，原始谣言标签为 `1`，真实为 `0`；而在模型训练逻辑中，谣言为 `0`，真实为 `1`。`_load_ablation_file` 中已通过 `LABEL_MAP` 添加了显式转换 (`1: 0, 0: 1`)，**切勿再次改动**，否则会导致标签全错、预测精确度异常变成 100%。
+- **数据增强进度**：CED 数据的增强已完成！`augmented_qwen.json` 已拥有来自 MiniMax 增强的 **15,288** 个虚拟节点（2548 条截断传播树），可以直接进行早期截断的消融实验。
+- `propagation_trees.json` 迭代方式视实际格式而定（可能是 list 也可能是 dict），改代码前先 `print(type(data))` 确认。
+- 虚拟节点 `is_virtual=True` 字段必须在整个数据流中完整传递，不要在任何中间处理步骤丢失。
+- Windows 路径用 `os.path.join()` 或 `pathlib.Path`，不要硬编码正斜杠。
+- Streamlit 缓存目录 `data/.aug_cache/` 已加入 `.gitignore`，不会上传。
 
 ---
 
-*最后更新：2026-04-07*
+*最后更新：2026-04-08*
