@@ -43,8 +43,9 @@ from utils.early_stage_simulator import batch_process_dataset
 
 # ──────────────────────── 固定超参 ────────────────────────
 SEED       = 42
-EPOCHS     = 3     # 调整为 3 以缩短耗时
+EPOCHS     = 5     # 增至 5，防止欠拟合
 BATCH_SIZE = 2     # RTX 3060 6GB；降低以避免 OOM
+EARLY_STOP_PATIENCE = 2  # val acc 连续 N epoch 不提升则停止
 LR         = 1e-5
 
 random.seed(SEED)
@@ -253,7 +254,10 @@ def train_one_epoch(model, loader, optimizer, device, class_weights, beta: float
     correct = 0
     total   = 0
 
-    for batch in loader:
+    n_batches = len(loader)
+    for step, batch in enumerate(loader):
+        if step % 100 == 0:
+            print(f"\r    batch {step}/{n_batches}  loss={total_loss/max(step,1):.4f}", end='', flush=True)
         input_ids    = batch['input_ids'].to(device)
         attn_mask    = batch['attention_mask'].to(device)
         rumor_labels = batch['rumor_labels'].to(device)
@@ -262,14 +266,13 @@ def train_one_epoch(model, loader, optimizer, device, class_weights, beta: float
 
         outputs = model(input_ids, attn_mask, task='both')
         loss_r  = criterion_rumor(outputs['rumor_logits'], rumor_labels)
-        loss_s  = criterion_stance(outputs['stance_logits'], stance_labels)
 
-        # 虚拟节点立场损失
+        # stance loss 仅对虚拟节点计算（CED 真实节点无 stance 标注）
         loss_vs = compute_virtual_stance_loss(
             outputs['stance_logits'], stance_labels, is_virtual, criterion_stance
         )
 
-        loss = TASK_WEIGHTS[0] * loss_r + TASK_WEIGHTS[1] * loss_s + beta * loss_vs
+        loss = TASK_WEIGHTS[0] * loss_r + beta * loss_vs
 
         if torch.isnan(loss):
             optimizer.zero_grad()
@@ -287,6 +290,7 @@ def train_one_epoch(model, loader, optimizer, device, class_weights, beta: float
         correct += (preds == rumor_labels).sum().item()
         total   += rumor_labels.size(0)
 
+    print(flush=True)  # 换行
     return total_loss / max(len(loader), 1), correct / max(total, 1)
 
 
@@ -419,6 +423,7 @@ def run_one_experiment(
     # 6. 训练
     best_acc = 0.0
     best_metrics = {}
+    no_improve = 0
 
     for epoch in range(EPOCHS):
         tr_loss, tr_acc = train_one_epoch(model, train_loader, optimizer, DEVICE, class_weights, beta)
@@ -429,11 +434,17 @@ def run_one_experiment(
               f"val_acc={val_metrics['accuracy']*100:.2f}%  "
               f"F1谣言={val_metrics['f1_rumor']:.4f}  "
               f"F1真实={val_metrics['f1_real']:.4f}  "
-              f"Stance-F1={val_metrics['stance_macro_f1']:.4f}")
+              f"Stance-F1={val_metrics['stance_macro_f1']:.4f}", flush=True)
 
         if val_metrics['accuracy'] > best_acc:
             best_acc = val_metrics['accuracy']
             best_metrics = val_metrics.copy()
+            no_improve = 0
+        else:
+            no_improve += 1
+            if no_improve >= EARLY_STOP_PATIENCE:
+                print(f"  [Early Stop] val_acc 连续 {EARLY_STOP_PATIENCE} epoch 未提升，提前终止")
+                break
 
     elapsed = time.time() - t0
     best_metrics['elapsed_sec'] = round(elapsed, 1)
@@ -492,11 +503,11 @@ def save_results(results: List[Dict]):
 # ─────────────────────────── 主入口 ────────────────────────
 
 EXPERIMENTS = [
-    {
+     {
         'exp_id':      'A',
         'description': '完整传播树 + 无增强',
         'data_mode':   'full',
-        'beta':        0.0,
+       'beta':        0.0,
     },
     {
         'exp_id':      'B',

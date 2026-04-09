@@ -8,6 +8,25 @@
 
 基于"极早期冷启动场景"的谣言检测系统。核心创新：用 LLM（Qwen API）生成**多立场虚拟回复**，补全传播树在谣言爆发初期（≤3条真实回复）的结构稀疏问题，再送入 Tree-LSTM 进行分类。
 
+## 虚拟节点生成技术说明 (LLM Generation)
+
+### 1. 技术来源与数据来源
+- **核心模型**: **MiniMax-M2.5-highspeed** (由于 Qwen 额度耗尽，已全面切换至 MiniMax)。
+- **接口协议**: Anthropic 兼容模式 (Base URL: `api.minimaxi.com/anthropic`)。
+- **原始数据集**: **CED_Dataset** (综合中文谣言数据集)。
+- **生成规模**: 对 CED 3387 棵树进行增强，共生成 **19,410** 个虚拟节点（跳过空文本6条，API失败146条，已缓存268条）。
+
+### 2. 生成策略 (Prompt Design)
+- **模拟角色**: `社交媒体用户行为模拟器`。
+- **输入数据**: 仅输入微博原帖（root）内容。
+- **立场平衡**: 强制要求生成 `[2*支持, 2*反对, 2*中立]` 的均衡立场组合，以补足谣言爆发前夕真实评论在立场上的分布缺失。
+- **结构化输出**: 严格输出 JSON 格式，包含 `comments` 列表，确保能无缝挂载至 `PropagationTree`。
+
+### 3. 数据可靠性保障
+- **磁盘缓存**: 采用 `data/.aug_cache/` MD5 缓存机制（Key 为 `微博内容` 的哈希），支持断点续传。
+- **自动校验**: 脚本内置立场集合校验（必须包含三类立场），校验失败会自动重试。
+- **信号衰减**: 在 `RelationAwareTreeLSTMCell` 中对所有来自 MiniMax 的虚拟节点应用 **0.7** 的隐状态衰减系数。
+
 ---
 
 ## 目录结构（只列关键文件）
@@ -31,7 +50,7 @@ E:\rumor_detection\
 │   └── crawler/cleaner.py           # 微博数据清洗
 │
 ├── scripts/
-│   ├── augment_test_data.py         # ★ Qwen 多立场增强主脚本（含断点续跑、磁盘缓存）
+│   ├── augment_test_data.py         # ★ MiniMax 多立场增强主脚本（含断点续跑、磁盘缓存）
 │   ├── build_ced_propagation.py     # ★ 从 CED_Dataset 构建三份传播树数据集
 │   ├── prepare_test_data.py         # 数据集划分（85/7/8）
 │   └── training/
@@ -44,10 +63,10 @@ E:\rumor_detection\
 │   ├── processed_crawled.json       # 主数据（见格式A）
 │   ├── weibo1_rumor.tsv             # 基础训练集（Label\tContent）
 │   ├── propagation_trees.json       # 传播树（见格式C）
-│   ├── augmented_qwen.json          # LLM增强输出（见格式D），当前31条
+│   ├── augmented_qwen.json          # LLM增强输出（见格式D），当前31条（processed_crawled用）
 │   ├── ced_full.json                # ★ CED完整传播树（3387条，avg 227条转发/树）
 │   ├── ced_early.json               # ★ CED极早期截断（前3条转发）
-│   ├── ced_early_augmented.json     # ★ CED极早期 + virtual_children 字段（待Qwen填充）
+│   ├── ced_early_augmented.json     # ★ CED极早期 + virtual_children（19410个虚拟节点，已完成）
 │   ├── ablation_early_real.json     # 消融实验B用（早期截断，无虚拟节点，展开行格式）
 │   ├── ablation_early_augmented.json # 消融实验C/D用（含虚拟节点）
 │   ├── ablation_results.json        # 消融实验结果（四组跑完后生成）
@@ -218,10 +237,10 @@ repost 文件格式（list，utf-8编码）：
 ## API 与环境
 
 ```python
-# Qwen API
-API_KEY = "sk-2ddddb50a0f84f01a5b155afb28de024"
-BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-
+# MiniMax API (Token Plan)
+MINIMAX_MODEL = "MiniMax-M2.5-highspeed"
+MINIMAX_BASE_URL = "https://api.minimaxi.com/anthropic"
+```
 # 硬件
 GPU = "RTX 3060 Laptop, 6GB VRAM"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -236,7 +255,7 @@ DATA_DIR     = "E:/rumor_detection/data"
 
 ---
 
-## Qwen Prompt 规范（核心创新，不要改动格式）
+## Qwen / MiniMax Prompt 规范（核心创新，不要改动格式）
 
 ```python
 MULTI_STANCE_PROMPT = """你是社交媒体用户行为模拟器。
@@ -275,15 +294,18 @@ MULTI_STANCE_PROMPT = """你是社交媒体用户行为模拟器。
 
 ---
 
-## 常见注意事项
+## 常见注意事项 & 最新进展 (2026-04-10)
 
-- `propagation_trees.json` 迭代方式视实际格式而定（可能是 list 也可能是 dict），改代码前先 `print(type(data))` 确认
-- 虚拟节点 `is_virtual=True` 字段必须在整个数据流中完整传递，不要在任何中间处理步骤丢失
-- Windows 路径用 `os.path.join()` 或 `pathlib.Path`，不要硬编码正斜杠
-- Streamlit 缓存目录 `data/.aug_cache/` 已加入 `.gitignore`，不会上传
-- `augmented_qwen.json` 目前仅31条（来自 processed_crawled.json），CED 数据尚未跑 Qwen 增强
-- `ced_early_augmented.json` 的 virtual_children 目前为空，需对 CED 文本单独跑 `augment_test_data.py`
+- **CED 增强已完成**：`ced_early_augmented.json` 含 **19,410** 个虚拟节点（3387棵树，跳过6条空文本，API失败146条，缓存命中268条），可直接用于消融实验 C/D。
+- **API 已切换至 MiniMax**：`augment_test_data.py` 使用 `anthropic` SDK + MiniMax Anthropic 兼容接口，不再调 Qwen。`scripts/augment_ced_data.py` 同理。
+- **CED 标签映射陷阱**：CED 原始谣言标签为 `1`，真实为 `0`；模型训练中谣言为 `0`，真实为 `1`。`_ced_label_to_int()` 已做显式转换（`1→0, 0→1`），**切勿再次改动**，否则标签全错、准确率异常升至 100%。
+- **run_ablation.py 数据源**：已切换为直接读 `ced_full/early/early_augmented.json`（嵌套树格式），不再依赖 `ablation_early_*.json` 行格式文件。
+- **消融实验超参**：`BATCH_SIZE=2`（RTX 3060 6GB），`EPOCHS=5`，`EARLY_STOP_PATIENCE=2`，`MAX_LEN=100`。
+- `propagation_trees.json` 迭代方式视实际格式而定（可能是 list 也可能是 dict），改代码前先 `print(type(data))` 确认。
+- 虚拟节点 `is_virtual=True` 字段必须在整个数据流中完整传递，不要在任何中间处理步骤丢失。
+- Windows 路径用 `os.path.join()` 或 `pathlib.Path`，不要硬编码正斜杠。
+- Streamlit 缓存目录 `data/.aug_cache/` 已加入 `.gitignore`，不会上传。
 
 ---
 
-*最后更新：2026-04-07*
+*最后更新：2026-04-10*

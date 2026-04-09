@@ -1,42 +1,49 @@
 # -*- coding: utf-8 -*-
 """
-CED 传播树多立场虚拟回复增强脚本
-使用 Qwen API 对 ced_full.json 生成含 virtual_children 的增强数据
-输出格式：也保存到 augmented_qwen.json，与现有条目合并
+CED 极早期传播树 LLM 增强脚本
+
+输入:  data/ced_early.json           （CED 极早期截断，每棵树 ≤3 条真实回复）
+输出:  data/ced_early_augmented.json  （同格式，添加 virtual_children 字段）
+
+使用 MiniMax API 对每棵树的根节点文本生成 6 条多立场虚拟回复。
+支持断点续跑：已完成的树从磁盘缓存读取，不重复调用 API。
+
+运行：
+    MINIMAX_API_KEY=xxx python scripts/augment_ced_data.py
 """
 import os
 import json
 import time
 import hashlib
-import requests
 from pathlib import Path
 
 import anthropic
 
-# MiniMax Token Plan 配置
-# 请将 your_minimax_token_plan_key 替换为你的实际 API Key
-MINIMAX_API_KEY = "your_minimax_token_plan_key"
+# ──────────────────────── 配置 ────────────────────────
+
+MINIMAX_API_KEY  = "sk-cp-OPqmVseIS1d8iyidChRRrL86O8mvfSRntORrdE56ZGRwdQpL_6m7QNfSlo7hM54JSzLUNUz6sbWs-9-gloxNw_C5dPzdStn2e6Y7p36B6m-z-03Hwadgd6c"
 MINIMAX_BASE_URL = "https://api.minimaxi.com/anthropic"
-MINIMAX_MODEL = "MiniMax-M2.5-highspeed"
+MINIMAX_MODEL    = "MiniMax-M2.5-highspeed"
 
-client = anthropic.Anthropic(
-    base_url=MINIMAX_BASE_URL,
-    api_key=MINIMAX_API_KEY
-)
-
-DATA_DIR = Path("E:/rumor_detection/data")
-INPUT_FILE = DATA_DIR / "ced_full.json"
-OUTPUT_FILE = DATA_DIR / "augmented_qwen.json"
-CACHE_DIR = DATA_DIR / ".aug_cache"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR     = PROJECT_ROOT / "data"
+INPUT_FILE   = DATA_DIR / "ced_early.json"
+OUTPUT_FILE  = DATA_DIR / "ced_early_augmented.json"
+CACHE_DIR    = DATA_DIR / ".aug_cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 MULTI_STANCE_PROMPT = """你是社交媒体用户行为模拟器。
-给定以下微博内容，请生成6条回复，严格按JSON输出，不要任何多余文字。
+给定以下微博帖子，请模拟6条普通网民对该信息真实性的评论，严格按JSON输出，不要任何多余文字。
+立场是对帖子所述信息的可信度判断：
+- "支持"：认为该信息可信、转发扩散
+- "反对"：质疑该信息的真实性、认为是谣言
+- "中立"：持观望态度、不确定真假
+
 要求：支持2条、反对2条、中立2条，立场必须均衡。
 
 微博内容：{content}
 
-输出格式：
+输出格式（只输出JSON，不要其他任何文字）：
 {{"comments": [
   {{"stance": "支持", "text": "...", "time": "0.3h"}},
   {{"stance": "反对", "text": "...", "time": "0.5h"}},
@@ -46,29 +53,40 @@ MULTI_STANCE_PROMPT = """你是社交媒体用户行为模拟器。
   {{"stance": "中立", "text": "...", "time": "1.7h"}}
 ]}}"""
 
+# 模型拒绝回答时的常见特征词（用于快速检测，避免白费重试）
+_REFUSAL_MARKERS = [
+    "无法完成", "无法满足", "我不能", "我无法", "不应生成", "违反", "请理解",
+    "抱歉", "无法协助", "不会生成", "不能模拟", "无法帮助",
+    "I'm sorry", "I cannot", "I can't", "I apologize", "not able to",
+]
+
+# ──────────────────────── 缓存 ────────────────────────
 
 def _cache_key(content: str) -> str:
     return hashlib.md5(content.encode("utf-8")).hexdigest()
 
-
 def _load_cache(content: str):
-    key = _cache_key(content)
-    cache_file = CACHE_DIR / f"{key}.json"
-    if cache_file.exists():
-        with open(cache_file, "r", encoding="utf-8") as f:
+    path = CACHE_DIR / f"{_cache_key(content)}.json"
+    if path.exists():
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     return None
 
+def _save_cache(content: str, comments: list):
+    path = CACHE_DIR / f"{_cache_key(content)}.json"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(comments, f, ensure_ascii=False)
 
-def _save_cache(content: str, result):
-    key = _cache_key(content)
-    cache_file = CACHE_DIR / f"{key}.json"
-    with open(cache_file, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False)
+# ──────────────────────── API 调用 ────────────────────────
 
+# 关键：ANTHROPIC_API_KEY 必须与 api_key 参数一致，SDK 用此做认证头
+client = anthropic.Anthropic(
+    base_url=MINIMAX_BASE_URL,
+    api_key=MINIMAX_API_KEY,
+)
 
-def call_minimax(content: str, max_retries: int = 2):
-    """调用 MiniMax API，返回解析后的 comments 列表，失败返回 None"""
+def call_minimax(content: str, max_retries: int = 4):
+    """调用 MiniMax API 生成多立场虚拟回复，返回 comments 列表；失败返回 None。"""
     cached = _load_cache(content)
     if cached is not None:
         return cached
@@ -80,29 +98,35 @@ def call_minimax(content: str, max_retries: int = 2):
             response = client.messages.create(
                 model=MINIMAX_MODEL,
                 max_tokens=1000,
-                system="你是一个专业的社交媒体行为模拟器，擅长生成不同立场的评论。",
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
+                system=(
+                    "你是谣言检测学术研究项目的数据标注助手。"
+                    "你的任务是为给定的微博帖子生成模拟评论，用于训练谣言检测模型。"
+                    "这是纯粹的学术研究目的，模拟评论代表不同用户对信息真实性的判断，"
+                    "不代表对任何事件的道德立场。请严格按JSON格式输出，不要任何其他文字。"
+                ),
+                messages=[{"role": "user", "content": prompt}],
             )
-            
-            raw = ""
-            for block in response.content:
-                if block.type == "text":
-                    raw += block.text
-            
-            raw = raw.strip()
+            raw = "".join(b.text for b in response.content if b.type == "text").strip()
 
-            # 提取 JSON 块
+            # 空响应 = 可能是速率限制，应该重试
+            if not raw:
+                raise ValueError("空响应（可能是速率限制）")
+
+            # 中文内容拒绝 = 真正的内容安全过滤，直接放弃
+            if any(m in raw for m in _REFUSAL_MARKERS):
+                print(f"  [内容拒绝] {repr(raw[:120])}")
+                return None  # 不重试
+
             start = raw.find("{")
-            end = raw.rfind("}") + 1
+            end   = raw.rfind("}") + 1
             if start == -1 or end == 0:
-                raise ValueError("未找到JSON块")
-            parsed = json.loads(raw[start:end])
+                print(f"  [raw response] {repr(raw[:300])}")
+                raise ValueError("未找到 JSON 块")
+
+            parsed   = json.loads(raw[start:end])
             comments = parsed.get("comments", [])
 
-            # 校验：三种立场都必须存在
-            stances = {c.get("stance") for c in comments}
+            stances  = {c.get("stance") for c in comments}
             required = {"支持", "反对", "中立"}
             if not required.issubset(stances):
                 raise ValueError(f"立场不均衡: {stances}")
@@ -113,93 +137,83 @@ def call_minimax(content: str, max_retries: int = 2):
         except Exception as e:
             print(f"  [attempt {attempt+1}] 失败: {e}")
             if attempt < max_retries:
-                time.sleep(2)
+                time.sleep(3 * (attempt + 1))  # 递增退避: 3s, 6s
 
     return None
 
 
 def build_virtual_children(comments: list) -> list:
-    """将 comments 列表转换为 virtual_children 格式"""
-    children = []
-    for i, c in enumerate(comments):
-        children.append({
-            "id": f"v_{i}",
-            "text": c.get("text", ""),
-            "time": c.get("time", f"{(i+1)*0.3:.1f}h"),
-            "stance": c.get("stance", "中立"),
-            "is_virtual": True
-        })
-    return children
+    return [
+        {
+            "id":         f"v_{i}",
+            "text":       c.get("text", ""),
+            "time":       c.get("time", f"{(i+1)*0.3:.1f}h"),
+            "stance":     c.get("stance", "中立"),
+            "is_virtual": True,
+        }
+        for i, c in enumerate(comments)
+    ]
 
+# ──────────────────────── 主程序 ────────────────────────
 
 def main():
     print("=" * 60)
-    print("CED 数据 Qwen 多立场虚拟回复增强")
+    print("CED 极早期传播树 LLM 增强")
+    print(f"  输入: {INPUT_FILE}")
+    print(f"  输出: {OUTPUT_FILE}")
     print("=" * 60)
 
     with open(INPUT_FILE, "r", encoding="utf-8") as f:
-        ced_data = json.load(f)
-    print(f"CED 原始数据: {len(ced_data)} 条")
+        trees: dict = json.load(f)
+    print(f"共 {len(trees)} 棵树")
 
-    # 如果已有输出文件，加载已完成的条目
-    results = []
+    # 断点续跑：加载已完成的输出
+    result: dict = {}
     if OUTPUT_FILE.exists():
         with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
-            results = json.load(f)
-        done_contents = {r.get("original", "")[:50] for r in results}
-        print(f"已完成: {len(results)} 条，继续增量处理")
-    else:
-        done_contents = set()
+            result = json.load(f)
+        augmented = sum(1 for t in result.values() if t.get("virtual_children"))
+        empty     = sum(1 for t in result.values() if "virtual_children" in t and not t.get("virtual_children"))
+        print(f"已增强: {augmented} 棵，待重试: {empty} 棵，继续增量处理...")
 
-    added_count = 0
-    # 我们只对 CED 数据中的前 100 条进行增强，以便快速看到效果（全量 3387 条耗时太久）
-    # 实际运行可以根据需要放开限制
-    TARGET_COUNT = 100 
-    
-    for idx, (root_id, item) in enumerate(ced_data.items()):
-        content = item.get("text", "").strip()
-        if not content or len(content) < 10:
-            continue
-        if content[:50] in done_contents:
+    done = 0
+    skipped = 0
+    failed  = 0
+
+    for idx, (root_id, tree) in enumerate(trees.items()):
+        # 已处理（virtual_children 非空）则跳过；空列表说明之前失败，需重试
+        if root_id in result and result[root_id].get("virtual_children"):
+            done += 1
             continue
 
-        if added_count >= TARGET_COUNT:
-            print(f"已达到目标数量 ({TARGET_COUNT})，停止。")
-            break
+        content = (tree.get("text") or "").strip()
+        if not content or len(content) < 5:
+            result[root_id] = {**tree, "virtual_children": []}
+            skipped += 1
+            continue
 
-        print(f"[{added_count+1}/{TARGET_COUNT}] 处理 CED [{root_id}]: {content[:40]}...")
+        if (idx + 1) % 50 == 0 or idx == 0:
+            print(f"[{idx+1}/{len(trees)}] 处理: {content[:50]}...")
+
         comments = call_minimax(content)
 
         if comments is None:
-            print("  跳过（API失败）")
-            continue
+            print(f"  [{root_id}] API 失败，写入空 virtual_children")
+            result[root_id] = {**tree, "virtual_children": []}
+            failed += 1
+        else:
+            result[root_id] = {**tree, "virtual_children": build_virtual_children(comments)}
 
-        virtual_children = build_virtual_children(comments)
-        
-        # 转换 label: CED 1=谣言, 0=非谣言；augmented_qwen 格式用 '辟谣'/'真实'/'虚假'
-        label_raw = item.get("label", 0)
-        label_str = "虚假" if label_raw == 1 else "真实"
-
-        results.append({
-            "original": content,
-            "augmented": content,
-            "augmentation_type": "multi_stance_llm",
-            "label": label_str,
-            "stance": "mixed",
-            "source": "qwen_virtual_replies",
-            "original_label": label_str,
-            "virtual_children": virtual_children
-        })
-
-        added_count += 1
-
-        # 每条保存一次
+        # 每条落盘，断点续跑安全
         with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-            json.dump(results, f, ensure_ascii=False, indent=2)
+            json.dump(result, f, ensure_ascii=False, indent=2)
 
-        time.sleep(0.5)
+        time.sleep(1.0)  # 限流：1秒/请求，防止速率限制
 
-    print(f"\n完成！目前共 {len(results)} 条，保存至: {OUTPUT_FILE}")
+    total_virt = sum(len(t.get("virtual_children", [])) for t in result.values())
+    print(f"\n完成！{len(result)} 棵树，共 {total_virt} 个虚拟节点")
+    print(f"  跳过（空文本）: {skipped}  API 失败: {failed}  已缓存跳过: {done}")
+    print(f"  输出: {OUTPUT_FILE}")
     print("=" * 60)
 
 
