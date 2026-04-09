@@ -14,7 +14,7 @@
 - **核心模型**: **MiniMax-M2.5-highspeed** (由于 Qwen 额度耗尽，已全面切换至 MiniMax)。
 - **接口协议**: Anthropic 兼容模式 (Base URL: `api.minimaxi.com/anthropic`)。
 - **原始数据集**: **CED_Dataset** (综合中文谣言数据集)。
-- **生成规模**: 对 CED 截断后的 **2548** 条样本进行增强，共生成 **15,288** 个虚拟节点。
+- **生成规模**: 对 CED 3387 棵树进行增强，共生成 **19,410** 个虚拟节点（跳过空文本6条，API失败146条，已缓存268条）。
 
 ### 2. 生成策略 (Prompt Design)
 - **模拟角色**: `社交媒体用户行为模拟器`。
@@ -50,7 +50,7 @@ E:\rumor_detection\
 │   └── crawler/cleaner.py           # 微博数据清洗
 │
 ├── scripts/
-│   ├── augment_test_data.py         # ★ Qwen 多立场增强主脚本（含断点续跑、磁盘缓存）
+│   ├── augment_test_data.py         # ★ MiniMax 多立场增强主脚本（含断点续跑、磁盘缓存）
 │   ├── build_ced_propagation.py     # ★ 从 CED_Dataset 构建三份传播树数据集
 │   ├── prepare_test_data.py         # 数据集划分（85/7/8）
 │   └── training/
@@ -63,10 +63,10 @@ E:\rumor_detection\
 │   ├── processed_crawled.json       # 主数据（见格式A）
 │   ├── weibo1_rumor.tsv             # 基础训练集（Label\tContent）
 │   ├── propagation_trees.json       # 传播树（见格式C）
-│   ├── augmented_qwen.json          # LLM增强输出（见格式D），当前31条
+│   ├── augmented_qwen.json          # LLM增强输出（见格式D），当前31条（processed_crawled用）
 │   ├── ced_full.json                # ★ CED完整传播树（3387条，avg 227条转发/树）
 │   ├── ced_early.json               # ★ CED极早期截断（前3条转发）
-│   ├── ced_early_augmented.json     # ★ CED极早期 + virtual_children 字段（待Qwen填充）
+│   ├── ced_early_augmented.json     # ★ CED极早期 + virtual_children（19410个虚拟节点，已完成）
 │   ├── ablation_early_real.json     # 消融实验B用（早期截断，无虚拟节点，展开行格式）
 │   ├── ablation_early_augmented.json # 消融实验C/D用（含虚拟节点）
 │   ├── ablation_results.json        # 消融实验结果（四组跑完后生成）
@@ -294,11 +294,13 @@ MULTI_STANCE_PROMPT = """你是社交媒体用户行为模拟器。
 
 ---
 
-## 常见注意事项 & 最新进展 (2026-04-07)
+## 常见注意事项 & 最新进展 (2026-04-10)
 
-- **Colab 迁移与优化**：已为 `run_ablation.py` 做了深度优化以适配 Colab T4 GPU（15GB）。包含使用 `collate_fn` 实现数据批量 On-the-fly Tokenization（解决内存 OOM 爆满和 CPU 空转死锁问题），并将安全 `BATCH_SIZE` 设置为了 `64`。
-- **CED 标签映射陷阱**：在 CED 数据集中，原始谣言标签为 `1`，真实为 `0`；而在模型训练逻辑中，谣言为 `0`，真实为 `1`。`_load_ablation_file` 中已通过 `LABEL_MAP` 添加了显式转换 (`1: 0, 0: 1`)，**切勿再次改动**，否则会导致标签全错、预测精确度异常变成 100%。
-- **数据增强进度**：CED 数据的增强已完成！`augmented_qwen.json` 已拥有来自 MiniMax 增强的 **15,288** 个虚拟节点（2548 条截断传播树），可以直接进行早期截断的消融实验。
+- **CED 增强已完成**：`ced_early_augmented.json` 含 **19,410** 个虚拟节点（3387棵树，跳过6条空文本，API失败146条，缓存命中268条），可直接用于消融实验 C/D。
+- **API 已切换至 MiniMax**：`augment_test_data.py` 使用 `anthropic` SDK + MiniMax Anthropic 兼容接口，不再调 Qwen。`scripts/augment_ced_data.py` 同理。
+- **CED 标签映射陷阱**：CED 原始谣言标签为 `1`，真实为 `0`；模型训练中谣言为 `0`，真实为 `1`。`_ced_label_to_int()` 已做显式转换（`1→0, 0→1`），**切勿再次改动**，否则标签全错、准确率异常升至 100%。
+- **run_ablation.py 数据源**：已切换为直接读 `ced_full/early/early_augmented.json`（嵌套树格式），不再依赖 `ablation_early_*.json` 行格式文件。
+- **消融实验超参**：`BATCH_SIZE=2`（RTX 3060 6GB），`EPOCHS=5`，`EARLY_STOP_PATIENCE=2`，`MAX_LEN=100`。
 - `propagation_trees.json` 迭代方式视实际格式而定（可能是 list 也可能是 dict），改代码前先 `print(type(data))` 确认。
 - 虚拟节点 `is_virtual=True` 字段必须在整个数据流中完整传递，不要在任何中间处理步骤丢失。
 - Windows 路径用 `os.path.join()` 或 `pathlib.Path`，不要硬编码正斜杠。
@@ -306,4 +308,4 @@ MULTI_STANCE_PROMPT = """你是社交媒体用户行为模拟器。
 
 ---
 
-*最后更新：2026-04-08*
+*最后更新：2026-04-10*

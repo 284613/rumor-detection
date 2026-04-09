@@ -503,12 +503,12 @@ def save_results(results: List[Dict]):
 # ─────────────────────────── 主入口 ────────────────────────
 
 EXPERIMENTS = [
-    # {
-    #     'exp_id':      'A',
-    #     'description': '完整传播树 + 无增强',
-    #     'data_mode':   'full',
-    #     'beta':        0.0,
-    # },
+     {
+        'exp_id':      'A',
+        'description': '完整传播树 + 无增强',
+        'data_mode':   'full',
+       'beta':        0.0,
+    },
     {
         'exp_id':      'B',
         'description': '极早期截断 + 无增强',
